@@ -1,0 +1,5 @@
+names:
+  0: Business Card
+path: /home/sagemaker-user/42174_AI_Studio_Hajimi/dataset
+train: train/images
+val: val/images

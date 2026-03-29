@@ -3,7 +3,7 @@
 
 from clearml import Task
 import os
-import cv2 # AWS 终端通常预装了 OpenCV
+import cv2 
 
 # 1. Initialize Task
 task = Task.init(project_name="AI_Studio_Demo", task_name="Pipeline step 2 data preprocessing")
@@ -36,4 +36,4 @@ for file_name in os.listdir(input_folder):
 task.upload_artifact(name='bcr_processed_images', artifact_object=output_folder)
 
 print(f"Successfully processed {processed_count} images.")
-print("Stage 2 Preprocessing Done 🔥")
+print("Stage 2 Preprocessing Done")

@@ -36,4 +36,4 @@ def verify_connection():
 
 if __name__ == "__main__":
     if verify_connection():
-        print("Ready for Data Pipeline Stage 1 🔥")
+        print("Ready for Data Pipeline Stage 1")
