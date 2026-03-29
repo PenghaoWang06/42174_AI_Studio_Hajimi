@@ -1,0 +1,7 @@
+The results of the specialized training using 150 images are in ‘Train.jpynb’, and the comparison results are in ‘S3_final_benchmark.jpynb’.
+
+I deleted the previously trained models before running the standalone tests.
+
+I need to organize the folder structure later; it's too messy.
+
+plan to delete the code for unpacking and the initial test code later, retaining only the specialized training code for future website integration.
