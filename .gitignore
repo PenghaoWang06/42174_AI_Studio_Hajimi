@@ -1,4 +1,11 @@
 dataset/unzipped_full_dataset/
 .ipynb_checkpoints/
+backend/.venv/
+backend/storage/
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+frontend/build/
 
 

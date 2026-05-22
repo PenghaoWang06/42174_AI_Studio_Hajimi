@@ -1,0 +1,6 @@
+storage/
+.venv/
+__pycache__/
+*.pyc
+.env
+.backend_run.*.log
