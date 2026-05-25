@@ -11,7 +11,7 @@ FastAPI backend for the SnapFolio business card contact workflow.
 - OCR extraction with EasyOCR by default
 - Optional OpenAI Vision OCR provider
 - Local storage for uploaded images and cropped detections
-- CORS enabled for a local Vite frontend
+- CORS enabled for a local Flutter frontend
 
 ## Setup
 
@@ -36,7 +36,6 @@ Uploaded images and crops are saved under `backend/storage/`.
 ```text
 SNAPFOLIO_DATABASE_PATH=backend/storage/business_card_contacts.sqlite3
 SNAPFOLIO_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-SNAPFOLIO_MODEL_PATH=../runs/detect/Training_Log/SnapFolio_Final_Battle/weights/best.pt
 SNAPFOLIO_OCR_PROVIDER=easyocr
 SNAPFOLIO_EASYOCR_LANGUAGES=en
 OPENAI_API_KEY=
@@ -63,7 +62,7 @@ DELETE /contacts/{id}
 
 ```powershell
 curl.exe -X POST "http://127.0.0.1:8000/cards/detect" `
-  -F "file=@..\dataset\113.jpg"
+  -F "file=@..\ml\dataset\113.jpg"
 ```
 
 Example response:

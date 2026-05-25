@@ -29,8 +29,8 @@ class DetectionResult:
 
 
 class BusinessCardDetector:
-    def __init__(self, model_path: Path | None = None, confidence: float = 0.25) -> None:
-        self.model_path = Path(model_path or settings.model_path)
+    def __init__(self, confidence: float = 0.25) -> None:
+        self.model_path = settings.model_path
         self.confidence = confidence
         self._model = None
 

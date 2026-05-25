@@ -1,16 +1,64 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart' hide XFile;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api_client.dart';
+import '../core/browser_camera_capture.dart';
 import '../models/card_detection.dart';
 import '../models/contact.dart';
 import '../models/ocr_result.dart';
 
 enum _WorkspacePage { home, review, detail }
+
+Future<XFile> _normalizeCameraCapture(
+  XFile file,
+  CameraLensDirection lensDirection,
+) async {
+  if (lensDirection != CameraLensDirection.front) {
+    return file;
+  }
+
+  final bytes = await file.readAsBytes();
+  final flippedBytes = await _flipImageHorizontally(bytes);
+  return XFile.fromData(
+    flippedBytes,
+    name: 'camera_capture.png',
+    mimeType: 'image/png',
+    length: flippedBytes.length,
+  );
+}
+
+Future<Uint8List> _flipImageHorizontally(Uint8List bytes) async {
+  final codec = await ui.instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  final image = frame.image;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final paint = Paint();
+
+  canvas.translate(image.width.toDouble(), 0);
+  canvas.scale(-1, 1);
+  canvas.drawImage(image, Offset.zero, paint);
+
+  final picture = recorder.endRecording();
+  final flippedImage = await picture.toImage(image.width, image.height);
+  final byteData = await flippedImage.toByteData(
+    format: ui.ImageByteFormat.png,
+  );
+
+  image.dispose();
+  flippedImage.dispose();
+
+  if (byteData == null) {
+    throw StateError('Unable to encode camera image');
+  }
+
+  return byteData.buffer.asUint8List();
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -115,9 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        setState(() {
-          _status = 'No camera found';
-        });
+        await _openBrowserCameraFallback('No camera found.');
         return;
       }
 
@@ -138,19 +184,43 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } on CameraException catch (error) {
-      setState(() {
-        _status = error.description ?? error.code;
-      });
+      await _openBrowserCameraFallback(error.description ?? error.code);
     } catch (error) {
-      setState(() {
-        _status = error.toString();
-      });
+      await _openBrowserCameraFallback(error.toString());
     } finally {
       if (mounted) {
         setState(() {
           _isOpeningCamera = false;
         });
       }
+    }
+  }
+
+  Future<void> _openBrowserCameraFallback(String message) async {
+    if (!mounted) {
+      return;
+    }
+
+    if (!isBrowserCameraCaptureSupported) {
+      setState(() {
+        _status = message;
+      });
+      return;
+    }
+
+    final file = await captureWithBrowserCamera(
+      context,
+      initialError: message,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (file != null) {
+      await _selectImage(file, 'Captured image');
+    } else {
+      setState(() {
+        _status = message;
+      });
     }
   }
 
@@ -1172,9 +1242,17 @@ class _CameraCaptureDialog extends StatefulWidget {
 }
 
 class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
+  static const _resolutionFallbacks = <ResolutionPreset>[
+    ResolutionPreset.high,
+    ResolutionPreset.medium,
+    ResolutionPreset.low,
+  ];
+
   CameraController? _controller;
   Future<void>? _initializeFuture;
   int _cameraIndex = 0;
+  int _initializeGeneration = 0;
+  bool _isInitializing = false;
   bool _isTakingPicture = false;
   String? _errorMessage;
 
@@ -1186,50 +1264,141 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
 
   @override
   void dispose() {
+    _initializeGeneration++;
     _controller?.dispose();
     super.dispose();
   }
 
   Future<void> _initializeCamera(int index) async {
-    final previousController = _controller;
-    final controller = CameraController(
-      widget.cameras[index],
-      ResolutionPreset.high,
-      enableAudio: false,
-    );
-    final initializeFuture = controller.initialize();
+    if (index < 0 || index >= widget.cameras.length || _isTakingPicture) {
+      return;
+    }
 
+    final generation = ++_initializeGeneration;
+    final previousController = _controller;
     setState(() {
       _cameraIndex = index;
-      _controller = controller;
-      _initializeFuture = initializeFuture;
+      _controller = null;
+      _initializeFuture = null;
+      _isInitializing = true;
       _errorMessage = null;
     });
 
     await previousController?.dispose();
+    await Future<void>.delayed(const Duration(milliseconds: 250));
 
-    try {
-      await initializeFuture;
-      if (mounted) {
-        setState(() {});
+    CameraException? lastCameraError;
+    Object? lastError;
+
+    for (final resolutionPreset in _resolutionFallbacks) {
+      if (!mounted || generation != _initializeGeneration) {
+        return;
       }
-    } on CameraException catch (error) {
-      if (mounted) {
+
+      final controller = CameraController(
+        widget.cameras[index],
+        resolutionPreset,
+        enableAudio: false,
+      );
+      final initializeFuture = controller.initialize();
+
+      setState(() {
+        _controller = controller;
+        _initializeFuture = initializeFuture;
+      });
+
+      try {
+        await initializeFuture;
+        if (!mounted || generation != _initializeGeneration) {
+          await controller.dispose();
+          return;
+        }
         setState(() {
-          _errorMessage = error.description ?? error.code;
+          _isInitializing = false;
+          _errorMessage = null;
         });
+        return;
+      } on CameraException catch (error) {
+        lastCameraError = error;
+        await controller.dispose();
+      } catch (error) {
+        lastError = error;
+        await controller.dispose();
       }
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = error.toString();
-        });
+
+      if (!mounted || generation != _initializeGeneration) {
+        return;
       }
+
+      setState(() {
+        if (identical(_controller, controller)) {
+          _controller = null;
+          _initializeFuture = null;
+        }
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+
+    if (mounted && generation == _initializeGeneration) {
+      setState(() {
+        _controller = null;
+        _initializeFuture = null;
+        _isInitializing = false;
+        _errorMessage = _cameraStartupError(lastCameraError, lastError);
+      });
     }
   }
 
+  String _cameraStartupError(CameraException? cameraError, Object? error) {
+    final details = cameraError?.description ?? cameraError?.code;
+    final fallbackDetails = error?.toString();
+    final message = details?.isNotEmpty == true ? details : fallbackDetails;
+    final cameraName = _cameraLabel(_cameraIndex);
+
+    if (message == null || message.isEmpty) {
+      return 'Unable to start $cameraName. Select another camera or try again.';
+    }
+
+    return 'Unable to start $cameraName: $message';
+  }
+
+  String _cameraLabel(int index) {
+    final camera = widget.cameras[index];
+    final name = camera.name.trim();
+    final label = name.isEmpty ? 'Camera ${index + 1}' : name;
+    return '$label (${_lensDirectionLabel(camera.lensDirection)})';
+  }
+
+  String _lensDirectionLabel(CameraLensDirection direction) {
+    switch (direction) {
+      case CameraLensDirection.front:
+        return 'front';
+      case CameraLensDirection.back:
+        return 'back';
+      case CameraLensDirection.external:
+        return 'external';
+    }
+  }
+
+  Future<void> _retryCamera() async {
+    if (_isTakingPicture || _isInitializing) {
+      return;
+    }
+    await _initializeCamera(_cameraIndex);
+  }
+
+  Future<void> _selectCamera(int? index) async {
+    if (index == null ||
+        index == _cameraIndex ||
+        _isTakingPicture ||
+        _isInitializing) {
+      return;
+    }
+    await _initializeCamera(index);
+  }
+
   Future<void> _switchCamera() async {
-    if (widget.cameras.length < 2 || _isTakingPicture) {
+    if (widget.cameras.length < 2 || _isTakingPicture || _isInitializing) {
       return;
     }
     final nextIndex = (_cameraIndex + 1) % widget.cameras.length;
@@ -1240,6 +1409,7 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
     final controller = _controller;
     if (controller == null ||
         !controller.value.isInitialized ||
+        _isInitializing ||
         _isTakingPicture) {
       return;
     }
@@ -1250,7 +1420,11 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
     });
 
     try {
-      final file = await controller.takePicture();
+      final capturedFile = await controller.takePicture();
+      final file = await _normalizeCameraCapture(
+        capturedFile,
+        widget.cameras[_cameraIndex].lensDirection,
+      );
       if (mounted) {
         Navigator.of(context).pop<XFile>(file);
       }
@@ -1275,9 +1449,45 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
     }
   }
 
+  Future<void> _useBrowserCapture() async {
+    if (!isBrowserCameraCaptureSupported ||
+        _isTakingPicture ||
+        _isInitializing) {
+      return;
+    }
+
+    final previousController = _controller;
+    setState(() {
+      _initializeGeneration++;
+      _controller = null;
+      _initializeFuture = null;
+      _isInitializing = false;
+    });
+    await previousController?.dispose();
+
+    if (!mounted) {
+      return;
+    }
+
+    final file = await captureWithBrowserCamera(
+      context,
+      initialError: _errorMessage,
+    );
+    if (mounted && file != null) {
+      Navigator.of(context).pop<XFile>(file);
+    } else if (mounted) {
+      await _initializeCamera(_cameraIndex);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
+    final canCapture = controller != null &&
+        controller.value.isInitialized &&
+        !_isInitializing &&
+        !_isTakingPicture &&
+        _errorMessage == null;
 
     return Dialog(
       child: ConstrainedBox(
@@ -1297,7 +1507,18 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
                     ),
                   ),
                   IconButton(
-                    onPressed: widget.cameras.length < 2 ? null : _switchCamera,
+                    onPressed: _isInitializing || _isTakingPicture
+                        ? null
+                        : _retryCamera,
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Retry camera',
+                  ),
+                  IconButton(
+                    onPressed: widget.cameras.length < 2 ||
+                            _isInitializing ||
+                            _isTakingPicture
+                        ? null
+                        : _switchCamera,
                     icon: const Icon(Icons.cameraswitch),
                     tooltip: 'Switch camera',
                   ),
@@ -1307,6 +1528,31 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
                     tooltip: 'Close',
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                key: ValueKey(_cameraIndex),
+                initialValue: _cameraIndex,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  labelText: 'Camera device',
+                ),
+                items: [
+                  for (var index = 0; index < widget.cameras.length; index++)
+                    DropdownMenuItem<int>(
+                      value: index,
+                      child: Text(
+                        _cameraLabel(index),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: widget.cameras.length < 2 ||
+                        _isInitializing ||
+                        _isTakingPicture
+                    ? null
+                    : _selectCamera,
               ),
               const SizedBox(height: 12),
               ClipRRect(
@@ -1337,8 +1583,16 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
                     child: const Text('Cancel'),
                   ),
                   const SizedBox(width: 8),
+                  if (isBrowserCameraCaptureSupported) ...[
+                    OutlinedButton.icon(
+                      onPressed: _isTakingPicture ? null : _useBrowserCapture,
+                      icon: const Icon(Icons.open_in_browser),
+                      label: const Text('Browser capture'),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   FilledButton.icon(
-                    onPressed: _isTakingPicture ? null : _takePicture,
+                    onPressed: canCapture ? _takePicture : null,
                     icon: _isTakingPicture
                         ? const SizedBox(
                             width: 18,
@@ -1359,6 +1613,11 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
 
   Widget _buildPreview(CameraController? controller) {
     if (controller == null || _initializeFuture == null) {
+      if (_errorMessage != null) {
+        return const Center(
+          child: Icon(Icons.videocam_off, color: Colors.white, size: 48),
+        );
+      }
       return const Center(child: CircularProgressIndicator());
     }
 
@@ -1368,12 +1627,23 @@ class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (_errorMessage != null) {
+        if (snapshot.hasError ||
+            _errorMessage != null ||
+            !controller.value.isInitialized) {
           return const Center(
             child: Icon(Icons.videocam_off, color: Colors.white, size: 48),
           );
         }
-        return CameraPreview(controller);
+        final preview = CameraPreview(controller);
+        if (widget.cameras[_cameraIndex].lensDirection !=
+            CameraLensDirection.front) {
+          return preview;
+        }
+        return Transform(
+          alignment: Alignment.center,
+          transform: Matrix4.diagonal3Values(-1, 1, 1),
+          child: preview,
+        );
       },
     );
   }

@@ -1,7 +1,8 @@
 param(
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 5173,
-    [string]$FlutterPath = "D:\_Env\flutter\bin\flutter.bat"
+    [string]$FlutterPath = "D:\_Env\flutter\bin\flutter.bat",
+    [switch]$SkipInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +35,25 @@ function Resolve-FlutterPath {
 }
 
 if (-not (Test-Path -LiteralPath $PythonPath)) {
-    throw "Backend Python environment was not found at $PythonPath"
+    if ($SkipInstall) {
+        throw "Backend Python environment was not found at $PythonPath"
+    }
+
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $pythonCommand) {
+        $pythonCommand = Get-Command py -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $pythonCommand) {
+        throw "Python was not found. Install Python or add it to PATH."
+    }
+
+    Write-Host "Creating backend virtual environment..."
+    Push-Location $BackendDir
+    try {
+        & $pythonCommand.Source -m venv .venv
+    } finally {
+        Pop-Location
+    }
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $BackendDir "app\main.py"))) {
@@ -48,6 +67,20 @@ if (-not (Test-Path -LiteralPath (Join-Path $FrontendDir "pubspec.yaml"))) {
 $ResolvedFlutterPath = Resolve-FlutterPath $FlutterPath
 $ApiBaseUrl = "http://127.0.0.1:$BackendPort"
 $FrontendUrl = "http://127.0.0.1:$FrontendPort"
+
+if (-not $SkipInstall) {
+    Write-Host "Installing backend dependencies..."
+    & $PythonPath -m pip install --upgrade pip
+    & $PythonPath -m pip install -r (Join-Path $BackendDir "requirements.txt")
+
+    Write-Host "Installing frontend dependencies..."
+    Push-Location $FrontendDir
+    try {
+        & $ResolvedFlutterPath pub get
+    } finally {
+        Pop-Location
+    }
+}
 
 if (Test-LocalPort $BackendPort) {
     Write-Host "Backend port $BackendPort is already in use. Skipping backend start."

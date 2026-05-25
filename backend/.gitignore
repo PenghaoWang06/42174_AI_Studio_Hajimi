@@ -1,6 +1,13 @@
-storage/
+# Local environment
 .venv/
+.env
+
+# Local runtime data
+storage/
+
+# Python caches
 __pycache__/
 *.pyc
-.env
+
+# Logs
 .backend_run.*.log

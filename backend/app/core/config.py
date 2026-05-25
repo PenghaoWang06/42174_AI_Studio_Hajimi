@@ -15,18 +15,6 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _default_model_path() -> Path:
-    training_root = PROJECT_DIR / "runs" / "detect" / "Training_Log"
-    candidates = sorted(
-        training_root.glob("*/weights/best.pt"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    if candidates:
-        return candidates[0]
-    return training_root / "SnapFolio_Final_Battle" / "weights" / "best.pt"
-
-
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "SnapFolio API"
@@ -41,12 +29,7 @@ class Settings:
     storage_dir: Path = Path(os.getenv("SNAPFOLIO_STORAGE_DIR", BACKEND_DIR / "storage"))
     upload_dir: Path = Path(os.getenv("SNAPFOLIO_UPLOAD_DIR", BACKEND_DIR / "storage" / "uploads"))
     crop_dir: Path = Path(os.getenv("SNAPFOLIO_CROP_DIR", BACKEND_DIR / "storage" / "crops"))
-    model_path: Path = Path(
-        os.getenv(
-            "SNAPFOLIO_MODEL_PATH",
-            _default_model_path(),
-        )
-    )
+    model_path: Path = BACKEND_DIR / "models" / "model.pt"
     ocr_provider: str = os.getenv("SNAPFOLIO_OCR_PROVIDER", "easyocr")
     easyocr_languages: tuple[str, ...] = tuple(
         _split_csv(os.getenv("SNAPFOLIO_EASYOCR_LANGUAGES", "en"))

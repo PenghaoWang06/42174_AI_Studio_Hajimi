@@ -1,9 +1,16 @@
+# Flutter generated files
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
 build/
+
+# Local environment
 .env
+
+# IDE files
 .idea/
 *.iml
+
+# Logs
 .flutter_run.*.log

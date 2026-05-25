@@ -29,7 +29,7 @@ class OpenAIOcrProvider:
 
     def extract(self, image_path: Path) -> OcrResult:
         if not settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is not configured")
+            raise RuntimeError("OPENAI_API_KEY is required for OpenAI OCR")
 
         from openai import OpenAI
 
